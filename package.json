@@ -1,7 +1,7 @@
 {
-  "name": "template-node-express",
-  "version": "0.0.1",
-  "description": "",
+  "name": "em-school-api",
+  "version": "0.1.0",
+  "description": "Multi-tenant K-12 SIS/LMS/ERP API (PRD v2)",
   "main": "src/index.ts",
   "scripts": {
     "start": "node dist/index.js",
@@ -10,16 +10,21 @@
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "npm run lint -- --fix",
     "test": "vitest",
-    "migrate": "node-pg-migrate"
+    "migrate": "node-pg-migrate",
+    "migrate:up": "tsx src/db/migrate-cli.ts up",
+    "workers": "tsx src/workers/run.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "@types/cors": "^2.8.19",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.81.5",
     "cloudinary": "^2.7.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
-    "envalid": "^8.0.0",
+    "expo-server-sdk": "^3.15.0",
     "express": "^4.19.2",
+    "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.1",
     "node-pg-migrate": "^7.9.1",

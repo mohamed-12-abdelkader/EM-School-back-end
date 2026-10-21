@@ -1,8 +1,9 @@
 /**
- * Aiven / corporate proxies often present a cert chain Node rejects by default.
- * Keep verification opt-in via DATABASE_SSL_REJECT_UNAUTHORIZED=true.
+ * SSL for managed Postgres (Supabase). Set DATABASE_SSL=true/false to override.
+ * Default: enabled when DATABASE_URL points at Supabase.
  */
-export const pgSsl =
-  process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === 'true'
-    ? { rejectUnauthorized: true as const }
-    : { rejectUnauthorized: false as const };
+import { config } from '../config/env';
+
+export const pgSsl = config.DATABASE_SSL
+  ? { rejectUnauthorized: config.DATABASE_SSL_REJECT_UNAUTHORIZED }
+  : undefined;

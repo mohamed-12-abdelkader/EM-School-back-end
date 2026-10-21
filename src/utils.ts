@@ -1,9 +1,7 @@
-import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
 import pino from 'pino';
 import { pinoHttp } from 'pino-http';
 import crypto from 'node:crypto';
-import { bool, cleanEnv, num, port, str, testOnly } from 'envalid';
 import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import { NextFunction, RequestHandler, Request, Response } from 'express';
@@ -14,6 +12,9 @@ import { v2 as cloudinary } from 'cloudinary';
 import fs from 'node:fs';
 import util from 'node:util';
 import path from 'node:path';
+import { config } from './config/env';
+
+export { config };
 
 // Utils functions
 export const asyncWrapper = (fn: RequestHandler) => {
@@ -56,36 +57,6 @@ export class HttpError extends Error {
     this.message = message;
   }
 }
-
-// Config
-export const config = cleanEnv(process.env, {
-  NODE_ENV: str({ devDefault: testOnly('test'), choices: ['development', 'production', 'test'] }),
-  CORS_ORIGIN: str(),
-  FRONTEND_HOST: str(),
-  SECRET_KEY: str({ devDefault: testOnly(crypto.randomBytes(32).toString('hex')) }),
-  ACCESS_TOKEN_EXPIRE_MINUTES: num({ default: 60 * 24 * 8 }), // 8 days
-  COMMON_TOKEN_EXPIRE_HOURS: num({ default: 8 }),
-
-  // Database
-  DATABASE_URL: str(),
-
-  // First Superuser
-  FIRST_SUPERUSER: str({ default: undefined }),
-  FIRST_SUPERUSER_PASSWORD: str({ default: undefined }),
-
-  // Emails
-  SMTP_HOST: str({ default: undefined }),
-  SMTP_USER: str({ default: undefined }),
-  SMTP_PASSWORD: str({ default: undefined }),
-  SMTP_PORT: port({ default: 587 }),
-  SMTP_TLS: bool({ default: true }),
-  SMTP_SSL: bool({ default: false }),
-  EMAILS_FROM_EMAIL: str({ default: undefined }),
-  EMAILS_FROM_NAME: str({ default: undefined }),
-
-  // CDN
-  CLOUDINARY_URL: str(),
-});
 
 // Security
 export async function generateToken(user: User, pool: Pool): Promise<string> {
@@ -162,7 +133,7 @@ cloudinary.config();
 
 function localUploadUrl(filePath: string) {
   const filename = path.basename(filePath);
-  const apiBase = (process.env.PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+  const apiBase = config.PUBLIC_API_URL.replace(/\/$/, '');
   return `${apiBase}/uploads/avatars/${filename}`;
 }
 

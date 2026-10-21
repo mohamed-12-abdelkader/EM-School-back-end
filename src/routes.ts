@@ -16,9 +16,14 @@ import { router as schoolAttendanceRouter } from './controllers/schoolAttendance
 import { router as schoolFeesRouter } from './controllers/schoolFees';
 import { router as teacherTimetableRouter } from './controllers/teacherTimetable';
 import { router as utilsRouter } from './controllers/utils';
+import { v1Router } from './routes/v1';
 
 export const router = Router();
 
+/** PRD multi-tenant API (Phase 1+) */
+router.use('/v1', v1Router);
+
+/** Legacy routes — retained during migration to /api/v1 modules */
 router.use('/', authRouter);
 router.use('/user', userRouter);
 router.use('/teacher', teacherTimetableRouter);
