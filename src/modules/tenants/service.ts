@@ -212,3 +212,169 @@ export async function assignMembership(
   });
   return { userId, ...input, password: undefined };
 }
+
+export async function listSections(tenantId: string, branchId?: string | null) {
+  const result = branchId
+    ? await pool.query(
+        `SELECT * FROM sections WHERE tenant_id = $1 AND branch_id = $2 ORDER BY name`,
+        [tenantId, branchId],
+      )
+    : await pool.query(`SELECT * FROM sections WHERE tenant_id = $1 ORDER BY name`, [tenantId]);
+  return result.rows;
+}
+
+/** One-shot Phase 1 school skeleton: branch, year, stream, grade, section, quota, admin + teacher. */
+export async function bootstrapPhase1(tenantId: string) {
+  const tenant = await getTenant(tenantId);
+  const slug = tenant.slug as string;
+
+  let branches = await listBranches(tenantId);
+  let branch = branches[0];
+  if (!branch) {
+    branch = await createBranch(tenantId, {
+      name: `${tenant.name} — الفرع الرئيسي`,
+      code: 'MAIN',
+      timezone: 'Africa/Cairo',
+    });
+  }
+
+  let years = await listAcademicYears(tenantId);
+  let year = years.find((y: { is_current: boolean }) => y.is_current) || years[0];
+  if (!year) {
+    year = await createAcademicYear(tenantId, {
+      branch_id: branch.id,
+      name: '2026/2027',
+      starts_on: '2026-09-01',
+      ends_on: '2027-06-30',
+      age_cutoff_month: 10,
+      age_cutoff_day: 1,
+      is_current: true,
+    });
+  }
+
+  let streams = await listStreams(tenantId, branch.id);
+  let stream = streams[0];
+  if (!stream) {
+    stream = await createStream(tenantId, {
+      branch_id: branch.id,
+      name: 'وطني',
+      grading_type: 'PERCENTAGE_WEIGHTED',
+    });
+  }
+
+  let grades = await listGradeLevels(tenantId, branch.id);
+  let grade = grades[0];
+  if (!grade) {
+    grade = await createGradeLevel(tenantId, {
+      branch_id: branch.id,
+      stream_id: stream.id,
+      stage: 'KINDERGARTEN',
+      name: 'KG1',
+      sequence_order: 1,
+      attendance_mode: 'DAILY',
+      min_age_years: 3.5,
+      max_age_years: 5.5,
+    });
+  }
+
+  let sections = await listSections(tenantId, branch.id);
+  let section = sections[0];
+  if (!section) {
+    section = await createSection(tenantId, {
+      branch_id: branch.id,
+      grade_level_id: grade.id,
+      academic_year_id: year.id,
+      name: 'أ',
+      capacity: 30,
+    });
+  }
+
+  await pool.query(
+    `INSERT INTO grade_seat_quotas (
+       tenant_id, branch_id, academic_year_id, grade_level_id, max_seats, enrolled_count, waitlist_count
+     ) VALUES ($1,$2,$3,$4,30,0,0)
+     ON CONFLICT (tenant_id, academic_year_id, grade_level_id) DO NOTHING`,
+    [tenantId, branch.id, year.id, grade.id],
+  );
+
+  const adminEmail = `admin@${slug}.local`;
+  const teacherEmail = `teacher@${slug}.local`;
+  const parentPassword = 'admin123456';
+
+  const admin = await assignMembership(tenantId, {
+    email: adminEmail,
+    password: parentPassword,
+    full_name: `مدير ${tenant.name}`,
+    branch_id: branch.id,
+    role: 'SCHOOL_ADMIN',
+  });
+
+  const teacher = await assignMembership(tenantId, {
+    email: teacherEmail,
+    password: parentPassword,
+    full_name: `معلم ${tenant.name}`,
+    branch_id: branch.id,
+    role: 'TEACHER',
+  });
+
+  return {
+    tenant: { id: tenant.id, name: tenant.name, slug },
+    branch,
+    academic_year: year,
+    stream,
+    grade_level: grade,
+    section,
+    accounts: {
+      school_admin: { email: adminEmail, password: parentPassword, userId: admin.userId },
+      teacher: { email: teacherEmail, password: parentPassword, userId: teacher.userId },
+    },
+  };
+}
+
+/** Public catalog for the admissions apply form (no auth). */
+export async function publicTenantCatalog(slug: string) {
+  const tenant = await getTenantBySlug(slug);
+  const branches = await listBranches(tenant.id);
+  const years = await listAcademicYears(tenant.id);
+  const grades = await listGradeLevels(tenant.id);
+  const sections = await listSections(tenant.id);
+  return {
+    tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+    branches: branches.map((b: { id: string; name: string; code: string }) => ({
+      id: b.id,
+      name: b.name,
+      code: b.code,
+    })),
+    academic_years: years.map(
+      (y: { id: string; name: string; is_current: boolean; starts_on: string }) => ({
+        id: y.id,
+        name: y.name,
+        is_current: y.is_current,
+        starts_on: y.starts_on,
+      }),
+    ),
+    grade_levels: grades.map(
+      (g: { id: string; name: string; stage: string; branch_id: string }) => ({
+        id: g.id,
+        name: g.name,
+        stage: g.stage,
+        branch_id: g.branch_id,
+      }),
+    ),
+    sections: sections.map(
+      (s: {
+        id: string;
+        name: string;
+        grade_level_id: string;
+        academic_year_id: string;
+        branch_id: string;
+      }) => ({
+        id: s.id,
+        name: s.name,
+        grade_level_id: s.grade_level_id,
+        academic_year_id: s.academic_year_id,
+        branch_id: s.branch_id,
+      }),
+    ),
+  };
+}

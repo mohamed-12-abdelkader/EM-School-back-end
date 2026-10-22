@@ -265,14 +265,33 @@ export async function enrollApplication(
     if (input.create_parent_account && (guardianEmail || guardianPhone)) {
       const password = input.parent_password || randomUUID().slice(0, 10);
       const hash = await bcrypt.hash(password, 10);
-      const user = await client.query(
-        `INSERT INTO mt_users (email, phone, password_hash, full_name)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (email) DO UPDATE SET phone = COALESCE(EXCLUDED.phone, mt_users.phone)
-         RETURNING id`,
-        [guardianEmail, guardianPhone, hash, guardianName],
+      const existing = await client.query(
+        `SELECT id FROM mt_users
+         WHERE ($1::text IS NOT NULL AND email = $1)
+            OR ($2::text IS NOT NULL AND phone = $2)
+         LIMIT 1`,
+        [guardianEmail, guardianPhone],
       );
-      parentUserId = user.rows[0].id;
+      if (existing.rowCount) {
+        parentUserId = existing.rows[0].id as string;
+        await client.query(
+          `UPDATE mt_users SET
+             password_hash = $2,
+             full_name = COALESCE($3, full_name),
+             email = COALESCE($4, email),
+             phone = COALESCE($5, phone)
+           WHERE id = $1`,
+          [parentUserId, hash, guardianName, guardianEmail, guardianPhone],
+        );
+      } else {
+        const user = await client.query(
+          `INSERT INTO mt_users (email, phone, password_hash, full_name)
+           VALUES ($1, $2, $3, $4)
+           RETURNING id`,
+          [guardianEmail, guardianPhone, hash, guardianName],
+        );
+        parentUserId = user.rows[0].id as string;
+      }
       await client.query(
         `INSERT INTO mt_memberships (tenant_id, branch_id, user_id, role)
          VALUES ($1, $2, $3, 'PARENT') ON CONFLICT DO NOTHING`,

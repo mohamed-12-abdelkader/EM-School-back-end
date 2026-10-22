@@ -131,6 +131,15 @@ admissionsRouter.post(
   }),
 );
 
+/** Public catalog for apply form dropdowns */
+publicAdmissionsRouter.get(
+  '/:tenantSlug/catalog',
+  asyncWrapper(async (req, res) => {
+    const { publicTenantCatalog } = await import('../tenants/service');
+    res.json(await publicTenantCatalog(req.params.tenantSlug));
+  }),
+);
+
 /** Public tenant-scoped apply */
 publicAdmissionsRouter.post(
   '/:tenantSlug/admissions/apply',

@@ -121,6 +121,37 @@ tenantsRouter.post(
   }),
 );
 
+tenantsRouter.get(
+  '/me/sections',
+  ...scoped,
+  rbacMiddleware(
+    ['SCHOOL_ADMIN', 'GROUP_EXECUTIVE', 'ACADEMIC_COORDINATOR', 'ADMISSIONS_OFFICER', 'TEACHER'],
+    'branch',
+  ),
+  asyncWrapper(async (req, res) => {
+    res.json(await tenantsService.listSections(req.context!.tenantId!, req.context!.branchId));
+  }),
+);
+
+tenantsRouter.post(
+  '/:tenantId/bootstrap-phase1',
+  authenticateJwt,
+  rbacMiddleware(['PLATFORM_SUPER_ADMIN'], 'cross_tenant'),
+  asyncWrapper(async (req, res) => {
+    res.status(201).json(await tenantsService.bootstrapPhase1(req.params.tenantId));
+  }),
+);
+
+tenantsRouter.post(
+  '/:tenantId/memberships',
+  authenticateJwt,
+  rbacMiddleware(['PLATFORM_SUPER_ADMIN'], 'cross_tenant'),
+  validate(AssignMembershipSchema),
+  asyncWrapper(async (req, res) => {
+    res.status(201).json(await tenantsService.assignMembership(req.params.tenantId, req.body));
+  }),
+);
+
 tenantsRouter.post(
   '/me/memberships',
   ...scoped,
