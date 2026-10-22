@@ -6,9 +6,11 @@ import { tenantContextMiddleware } from '../../middlewares/tenantContext';
 import { entitlementMiddleware } from '../../middlewares/entitlement';
 import { rbacMiddleware } from '../../middlewares/rbac';
 import {
+  AttachDocumentsSchema,
   CreateApplicationSchema,
   EnrollApplicationSchema,
   PresignDocumentSchema,
+  PublicPresignDocumentSchema,
   RecordScoresSchema,
   ScheduleExamSchema,
   UpdateDocumentStatusSchema,
@@ -148,5 +150,32 @@ publicAdmissionsRouter.post(
     const tenant = await getTenantBySlug(req.params.tenantSlug);
     const app = await admissionsService.createApplication(tenant.id, req.body);
     res.status(201).json({ id: app.id, status: app.status, tenant: tenant.slug });
+  }),
+);
+
+publicAdmissionsRouter.post(
+  '/:tenantSlug/admissions/applications/:id/documents/presign',
+  validate(PublicPresignDocumentSchema),
+  asyncWrapper(async (req, res) => {
+    const tenant = await getTenantBySlug(req.params.tenantSlug);
+    res.json(
+      await admissionsService.presignDocument(
+        tenant.id,
+        req.params.id,
+        req.body.document_type,
+        req.body.content_type,
+      ),
+    );
+  }),
+);
+
+publicAdmissionsRouter.post(
+  '/:tenantSlug/admissions/applications/:id/documents',
+  validate(AttachDocumentsSchema),
+  asyncWrapper(async (req, res) => {
+    const tenant = await getTenantBySlug(req.params.tenantSlug);
+    res
+      .status(201)
+      .json(await admissionsService.attachDocuments(tenant.id, req.params.id, req.body.documents));
   }),
 );

@@ -56,3 +56,25 @@ export const EnrollApplicationSchema = z.object({
   create_parent_account: z.boolean().default(true),
   parent_password: z.string().min(6).optional(),
 });
+
+export const AttachDocumentsSchema = z.object({
+  documents: z
+    .array(
+      z.object({
+        type: z.string().min(1),
+        path: z.string().optional(),
+        url: z.string().optional(),
+        file_name: z.string().optional(),
+        status: z
+          .enum(['PENDING', 'APPROVED', 'REJECTED_RESUBMIT', 'VERIFIED'])
+          .default('PENDING'),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+
+export const PublicPresignDocumentSchema = z.object({
+  document_type: z.string().min(1),
+  content_type: z.string().optional(),
+});

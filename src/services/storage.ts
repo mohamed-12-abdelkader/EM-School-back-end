@@ -24,27 +24,66 @@ export async function createUploadUrl(params: {
   contentType?: string;
   expiresInSeconds?: number;
 }) {
-  const client = getAdminClient();
-  const ext = (params.contentType || 'application/octet-stream').includes('pdf') ? 'pdf' : 'bin';
+  const ext = (params.contentType || 'application/octet-stream').includes('pdf')
+    ? 'pdf'
+    : (params.contentType || '').includes('image')
+      ? 'jpg'
+      : 'bin';
   const path = `${params.tenantId}/${params.applicationId}/${params.documentType}-${randomUUID()}.${ext}`;
 
-  const { data, error } = await client.storage
-    .from(config.SUPABASE_STORAGE_BUCKET)
-    .createSignedUploadUrl(path);
-
-  if (error || !data) {
-    throw new HttpError(500, error?.message || 'Failed to create upload URL');
+  // Dev / Phase 1 fallback when Storage credentials are missing
+  if (!config.SUPABASE_URL || !config.SUPABASE_SERVICE_ROLE_KEY) {
+    return {
+      path: `local://${path}`,
+      token: 'local-dev',
+      signedUrl: null as string | null,
+      storageMode: 'local' as const,
+      expiresIn: params.expiresInSeconds ?? 3600,
+    };
   }
 
-  return {
-    path,
-    token: data.token,
-    signedUrl: data.signedUrl,
-    expiresIn: params.expiresInSeconds ?? 3600,
-  };
+  try {
+    const client = getAdminClient();
+    const { data, error } = await client.storage
+      .from(config.SUPABASE_STORAGE_BUCKET)
+      .createSignedUploadUrl(path);
+
+    if (error || !data) {
+      // Bucket missing / RLS / network — keep admissions usable in Phase 1
+      return {
+        path: `local://${path}`,
+        token: 'local-dev',
+        signedUrl: null as string | null,
+        storageMode: 'local' as const,
+        expiresIn: params.expiresInSeconds ?? 3600,
+        warning: error?.message || 'Storage unavailable — using local document registry',
+      };
+    }
+
+    return {
+      path,
+      token: data.token,
+      signedUrl: data.signedUrl as string,
+      storageMode: 'supabase' as const,
+      expiresIn: params.expiresInSeconds ?? 3600,
+    };
+  } catch (err) {
+    return {
+      path: `local://${path}`,
+      token: 'local-dev',
+      signedUrl: null as string | null,
+      storageMode: 'local' as const,
+      expiresIn: params.expiresInSeconds ?? 3600,
+      warning: err instanceof Error ? err.message : 'Storage unavailable',
+    };
+  }
 }
 
 export async function createDownloadUrl(path: string, expiresInSeconds = 3600) {
+  if (path.startsWith('local://') || !config.SUPABASE_URL || !config.SUPABASE_SERVICE_ROLE_KEY) {
+    return { path, signedUrl: null as string | null, expiresIn: expiresInSeconds, storageMode: 'local' as const };
+  }
+
   const client = getAdminClient();
   const { data, error } = await client.storage
     .from(config.SUPABASE_STORAGE_BUCKET)
@@ -54,5 +93,5 @@ export async function createDownloadUrl(path: string, expiresInSeconds = 3600) {
     throw new HttpError(500, error?.message || 'Failed to create download URL');
   }
 
-  return { path, signedUrl: data.signedUrl, expiresIn: expiresInSeconds };
+  return { path, signedUrl: data.signedUrl, expiresIn: expiresInSeconds, storageMode: 'supabase' as const };
 }

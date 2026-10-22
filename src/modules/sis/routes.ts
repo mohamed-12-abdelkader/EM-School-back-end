@@ -199,6 +199,19 @@ sisRouter.get(
   }),
 );
 
+sisRouter.get(
+  '/parent/alerts',
+  ...staff,
+  rbacMiddleware(['PARENT'], 'branch'),
+  asyncWrapper(async (req, res) => {
+    const studentId =
+      typeof req.query.student_id === 'string' ? req.query.student_id : undefined;
+    res.json(
+      await sisService.parentAlerts(req.context!.tenantId!, req.context!.userId, studentId),
+    );
+  }),
+);
+
 webhooksRouter.post(
   '/hardware/attendance',
   hmacWebhookMiddleware,

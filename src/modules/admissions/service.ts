@@ -431,6 +431,39 @@ export async function presignDocument(
   });
 }
 
+/** Append document metadata to an application (public or staff). */
+export async function attachDocuments(
+  tenantId: string,
+  applicationId: string,
+  docs: Array<{ type: string; path?: string; url?: string; file_name?: string; status?: string }>,
+) {
+  const existing = await pool.query(
+    `SELECT documents FROM admission_applications WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, applicationId],
+  );
+  if (!existing.rowCount) throw new HttpError(404, 'Application not found');
+
+  const prev = (existing.rows[0].documents || []) as Array<Record<string, unknown>>;
+  const next = [
+    ...prev,
+    ...docs.map((d) => ({
+      type: d.type,
+      path: d.path,
+      url: d.url,
+      file_name: d.file_name,
+      status: d.status || 'PENDING',
+      uploaded_at: new Date().toISOString(),
+    })),
+  ];
+
+  const updated = await pool.query(
+    `UPDATE admission_applications SET documents = $3::jsonb, updated_at = NOW()
+     WHERE tenant_id = $1 AND id = $2 RETURNING *`,
+    [tenantId, applicationId, JSON.stringify(next)],
+  );
+  return updated.rows[0];
+}
+
 export async function getDocumentDownload(path: string) {
   return createDownloadUrl(path);
 }

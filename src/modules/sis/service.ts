@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import pool from '../../db/pool';
 import { HttpError } from '../../utils';
+import { writeOutbox } from '../../services/notifications';
 import { enqueueAttendanceAlert, enqueueMessagingFallback } from '../../workers/queues';
 import type { z } from 'zod';
 import type {
@@ -187,6 +188,14 @@ export async function createClinicVisit(
   );
 
   if (input.parent_contacted) {
+    await writeOutbox({
+      tenantId,
+      channel: 'PUSH',
+      recipient: input.student_id,
+      relatedType: 'clinic',
+      relatedId: input.student_id,
+      payload: { type: 'CLINIC_VISIT', visitId: result.rows[0].id, studentId: input.student_id },
+    });
     await enqueueMessagingFallback({
       tenantId,
       channel: 'PUSH',
@@ -300,11 +309,36 @@ export async function upsertAttendance(
 
   const row = result.rows[0];
   if (row.status === 'ABSENT' || row.status === 'LATE') {
+    const attendanceDate = String(row.attendance_date).slice(0, 10);
+    const guardians = await pool.query(
+      `SELECT g.user_id, g.phone, g.email, s.full_name
+       FROM students s
+       JOIN student_guardians g ON g.family_group_id = s.family_group_id AND g.tenant_id = s.tenant_id
+       WHERE s.tenant_id = $1 AND s.id = $2`,
+      [tenantId, row.student_id],
+    );
+    for (const g of guardians.rows) {
+      const recipient = String(g.user_id || g.phone || g.email || 'unknown');
+      await writeOutbox({
+        tenantId,
+        channel: 'PUSH',
+        recipient,
+        relatedType: 'attendance',
+        relatedId: row.student_id,
+        payload: {
+          type: 'ATTENDANCE_ALERT',
+          studentId: row.student_id,
+          studentName: g.full_name,
+          status: row.status,
+          attendanceDate,
+        },
+      });
+    }
     await enqueueAttendanceAlert({
       tenantId,
       studentId: row.student_id,
       status: row.status,
-      attendanceDate: String(row.attendance_date).slice(0, 10),
+      attendanceDate,
     });
   }
   return row;
@@ -464,6 +498,33 @@ export async function parentChildren(tenantId: string, userId: string) {
      WHERE s.tenant_id = $1 AND g.user_id = $2 AND s.lifecycle_status = 'ACTIVE'
      ORDER BY s.full_name`,
     [tenantId, userId],
+  );
+  return result.rows;
+}
+
+/** In-app alert feed for parents (attendance / clinic / behavior / docs). */
+export async function parentAlerts(tenantId: string, userId: string, studentId?: string) {
+  const children = await parentChildren(tenantId, userId);
+  const childIds = children.map((c: { id: string }) => c.id);
+  if (!childIds.length) return [];
+
+  const result = await pool.query(
+    `SELECT id, channel, recipient, payload, status, related_type, related_id, created_at, sent_at
+     FROM notification_outbox
+     WHERE tenant_id = $1
+       AND (
+         recipient = $2
+         OR related_id = ANY($3::uuid[])
+         OR COALESCE(payload->>'studentId','') = ANY($3::text[])
+       )
+       AND (
+         $4::uuid IS NULL
+         OR related_id = $4
+         OR COALESCE(payload->>'studentId','') = $4::text
+       )
+     ORDER BY created_at DESC
+     LIMIT 50`,
+    [tenantId, userId, childIds, studentId ?? null],
   );
   return result.rows;
 }
