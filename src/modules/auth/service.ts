@@ -57,10 +57,15 @@ export async function login(input: {
   }>(
     `SELECT tenant_id, branch_id, role FROM mt_memberships
      WHERE user_id = $1 AND is_active = TRUE
-       AND ($2::uuid IS NULL OR tenant_id = $2)
+       AND ($2::uuid IS NULL OR tenant_id = $2 OR role::text = 'PLATFORM_SUPER_ADMIN')
        AND ($3::text IS NULL OR role::text = $3)
      ORDER BY
-       CASE WHEN role::text = 'PLATFORM_SUPER_ADMIN' THEN 0 ELSE 1 END,
+       CASE
+         WHEN $3::text IS NOT NULL AND role::text = $3 THEN 0
+         WHEN role::text = 'SCHOOL_ADMIN' THEN 1
+         WHEN role::text = 'PLATFORM_SUPER_ADMIN' THEN 9
+         ELSE 2
+       END,
        created_at ASC`,
     [user.id, input.tenantId ?? null, input.role ?? null],
   );

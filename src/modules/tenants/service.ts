@@ -317,6 +317,12 @@ export async function bootstrapPhase1(tenantId: string) {
     role: 'TEACHER',
   });
 
+  // ERP product seeds (timetable subjects + default tuition structure)
+  const { seedDefaultSubjects } = await import('../academics/service.js');
+  const { seedDefaultFees } = await import('../finance/service.js');
+  const subjects = await seedDefaultSubjects(tenantId, branch.id);
+  const fees = await seedDefaultFees(tenantId, admin.userId);
+
   return {
     tenant: { id: tenant.id, name: tenant.name, slug },
     branch,
@@ -324,6 +330,10 @@ export async function bootstrapPhase1(tenantId: string) {
     stream,
     grade_level: grade,
     section,
+    erp: {
+      subjects_seeded: subjects.length,
+      fee_structure: fees.structure?.name,
+    },
     accounts: {
       school_admin: { email: adminEmail, password: parentPassword, userId: admin.userId },
       teacher: { email: teacherEmail, password: parentPassword, userId: teacher.userId },
