@@ -4,7 +4,7 @@ import { router as authRouter } from './controllers/auth';
 import { router as userRouter } from './controllers/user';
 import { router as teacherRouter } from './controllers/teacher';
 import { router as studentRouter } from './controllers/student';
-import { router as studentPortalRouter } from './controllers/studentPortal';
+import { router as studentPortalRouter } from './studentPortal';
 import { router as schoolsRouter } from './controllers/schools';
 import { router as schoolGradesRouter } from './controllers/schoolGrades';
 import { router as schoolClassroomsRouter } from './controllers/schoolClassrooms';
@@ -16,7 +16,7 @@ import { router as schoolParentsRouter } from './controllers/schoolParents';
 import { router as schoolAttendanceRouter } from './controllers/schoolAttendance';
 import { router as schoolFeesRouter } from './controllers/schoolFees';
 import { router as teacherTimetableRouter } from './controllers/teacherTimetable';
-import { router as teacherPortalRouter } from './controllers/teacherPortal';
+import { router as teacherPortalRouter } from './teacherPortal';
 import { router as utilsRouter } from './controllers/utils';
 import { v1Router } from './routes/v1';
 

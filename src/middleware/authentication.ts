@@ -11,10 +11,16 @@ export function authMiddleware(roles: Roles[] = []): RequestHandler {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ message: 'Unauthorized' });
 
+    let decoded: { id: number; jti?: string };
     try {
-      const decoded = jwt.verify(token, config.SECRET_KEY) as any;
-      const { id, jti } = decoded;
+      decoded = jwt.verify(token, config.SECRET_KEY) as { id: number; jti?: string };
+    } catch {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
 
+    const { id, jti } = decoded;
+
+    try {
       // Fetch user from DB
       const result = await pool.query<User>(
         'SELECT id, role, jti, school_id, email, name FROM users WHERE id = $1',
@@ -49,7 +55,9 @@ export function authMiddleware(roles: Roles[] = []): RequestHandler {
       req.user = user;
       next();
     } catch {
-      return res.status(401).json({ message: 'Invalid token' });
+      // DB timeouts / connection errors must NOT look like auth failures —
+      // otherwise the client clears the session and bounces to login.
+      return res.status(503).json({ message: 'Service temporarily unavailable' });
     }
   };
 }
