@@ -133,18 +133,23 @@ cloudinary.config();
 
 function localUploadUrl(filePath: string) {
   const filename = path.basename(filePath);
+  const relDir = path.relative(uploadsRoot, path.dirname(filePath)).replace(/\\/g, '/');
+  const folder =
+    relDir && !relDir.startsWith('..') && relDir !== '.' ? relDir : 'avatars';
   const apiBase = config.PUBLIC_API_URL.replace(/\/$/, '');
-  return `${apiBase}/uploads/avatars/${filename}`;
+  return `${apiBase}/uploads/${folder}/${filename}`;
 }
 
 /**
- * Upload image to Cloudinary. If Cloudinary is unavailable/disabled,
- * keep the local file and return a locally served URL so uploads still work.
+ * Upload media to Cloudinary. If Cloudinary is unavailable/disabled,
+ * keep the local file and return a locally served URL under the same
+ * uploads subfolder (avatars/, materials/, …).
  */
 export const uploadToCloudinary = async (filePath: string) => {
   try {
     const result = await cloudinary.uploader.upload(filePath, {
       folder: 'media',
+      resource_type: 'auto',
     });
     await unlinkFile(filePath);
     return result;
@@ -153,9 +158,10 @@ export const uploadToCloudinary = async (filePath: string) => {
       { err: error, filePath },
       'Cloudinary upload failed; falling back to local storage',
     );
+    const local = localUploadUrl(filePath);
     return {
-      secure_url: localUploadUrl(filePath),
-      url: localUploadUrl(filePath),
+      secure_url: local,
+      url: local,
     };
   }
 };

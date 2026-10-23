@@ -3,6 +3,12 @@
 
 # environment variables
 .env
+.env-*
+.env.*
+!.env.example
+
+# local uploads
+/uploads
 
 # typescript build folder
 /dist

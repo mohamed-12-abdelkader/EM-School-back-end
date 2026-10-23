@@ -25,10 +25,11 @@ const errorHandler = (err: Error, req: Request, res: Response<ErrorBody>, _: Nex
     return;
   }
 
-  logger.error(err, loggerMsg);
+  logger.error({ err, message: err?.message, stack: err?.stack }, loggerMsg);
+  const isDev = process.env.NODE_ENV === 'development';
   res.status(500).send({
     status: 500,
-    message: 'Something went wrong',
+    message: isDev && err?.message ? err.message : 'Something went wrong',
     name: 'InternalServerError',
   });
 };

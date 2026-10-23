@@ -27,15 +27,47 @@ const corsOptionsDelegate: CorsOptionsDelegate<Request> = (req, callback) => {
 
 export const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cors(corsOptionsDelegate));
 app.use(loggerMiddleware);
 
-// Local uploaded files (logo/avatar fallback when Cloudinary is unavailable)
-app.use('/uploads', express.static(uploadsRoot));
+// Local uploaded files (materials / avatars). Allow embedding PDFs in the teacher UI.
+app.use(
+  '/uploads',
+  (req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    // Help browsers show PDF inline instead of forcing opaque download-only frames
+    if (req.path.toLowerCase().endsWith('.pdf')) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline');
+    }
+    next();
+  },
+  express.static(uploadsRoot, {
+    setHeaders(res, filePath) {
+      if (filePath.toLowerCase().endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline');
+      }
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
+  }),
+);
 
-// Routes
+// Routes — JSON with UTF-8 so Arabic titles never get mislabeled
+app.use('/api', (req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = ((body: unknown) => {
+    if (!res.getHeader('Content-Type')) {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    }
+    return originalJson(body);
+  }) as typeof res.json;
+  next();
+});
 app.use('/api', router);
 
 app.use(errorHandlerMiddleware);
