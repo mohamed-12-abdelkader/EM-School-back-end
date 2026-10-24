@@ -9,9 +9,13 @@
     "build": "tsc",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "npm run lint -- --fix",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --config vitest.config.mts",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
     "migrate": "node-pg-migrate",
     "migrate:up": "tsx src/db/migrate-cli.ts up",
+    "migrate:up:test": "tsx src/test/migrateTestDb.ts",
     "workers": "tsx src/workers/run.ts"
   },
   "dependencies": {

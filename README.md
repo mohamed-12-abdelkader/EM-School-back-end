@@ -54,3 +54,17 @@ Legacy `/api/school/*` routes remain while modules migrate to `/api/v1/*`.
 | POST | `/api/v1/sis/webhooks/hardware/attendance` | RFID / biometric (HMAC) |
 
 Tenant-scoped routes expect header `x-tenant-id` (and optional `x-branch-id`).
+
+## Testing
+
+```bash
+# Unit tests (no DB) — default
+npm run test:unit
+
+# Integration tests — dedicated Postgres only (never em-school / prod)
+cp .env.test.example .env.test
+# set DATABASE_URL to …/em-school-test (name must contain "test")
+npm run test:integration
+```
+
+Integration suite uses Supertest against `app` (no Redis workers), migrates the test DB once, then resets tables between cases. Safety check refuses any `DATABASE_URL` whose DB name does not include `test`.
