@@ -7,6 +7,8 @@ import * as controller from './controller';
 import {
   IdParamSchema,
   SubjectIdQuerySchema,
+  EnsureChatSchema,
+  SendChatMessageSchema,
   SubmitExamSchema,
   SubmitTaskPdfSchema,
   SubmitTaskSchema,
@@ -92,6 +94,13 @@ router.get(
 );
 
 router.post(
+  '/portal/exams/:id/start',
+  studentAuth,
+  validateParams(IdParamSchema),
+  asyncWrapper(controller.startExam),
+);
+
+router.post(
   '/portal/exams/:id/submit',
   studentAuth,
   validateParams(IdParamSchema),
@@ -127,4 +136,28 @@ router.post(
   '/portal/notifications/read-all',
   studentAuth,
   asyncWrapper(controller.markAllNotificationsRead),
+);
+
+router.get('/portal/chats', studentAuth, asyncWrapper(controller.listChats));
+
+router.post(
+  '/portal/chats',
+  studentAuth,
+  validate(EnsureChatSchema),
+  asyncWrapper(controller.ensureChatWithTeacher),
+);
+
+router.get(
+  '/portal/chats/:id/messages',
+  studentAuth,
+  validateParams(IdParamSchema),
+  asyncWrapper(controller.getChatMessages),
+);
+
+router.post(
+  '/portal/chats/:id/messages',
+  studentAuth,
+  validateParams(IdParamSchema),
+  validate(SendChatMessageSchema),
+  asyncWrapper(controller.sendChatMessage),
 );

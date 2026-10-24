@@ -3,7 +3,7 @@ import { authMiddleware } from '../middleware/authentication';
 import { validate } from '../middleware/validateReq';
 import { asyncWrapper, HttpError } from '../utils';
 import pool from '../db/pool';
-import { allocateUniqueLoginCode } from '../services/accessCodes';
+import { allocateUniqueParentLoginCode } from '../services/accessCodes';
 import { UpdateSchoolParentSchema } from './schoolParents.modules';
 
 export const router = Router();
@@ -242,7 +242,7 @@ router.post(
     );
     if (!existing.rowCount) throw new HttpError(404, 'Parent not found');
 
-    const code = await allocateUniqueLoginCode(schoolId);
+    const code = await allocateUniqueParentLoginCode();
     await pool.query(`UPDATE users SET login_code = $1 WHERE id = $2`, [code, id]);
 
     res.json({

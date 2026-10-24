@@ -14,6 +14,9 @@ import {
   UpdateLessonSchema,
   UpdateTaskSchema,
   UpsertTaskGradeSchema,
+  CreateStudentOpinionSchema,
+  UpdateStudentOpinionSchema,
+  StudentOpinionsQuerySchema,
 } from './schemas';
 import { materialUpload } from './upload';
 import { z } from 'zod';
@@ -209,4 +212,70 @@ router.put(
   validateParams(IdParamSchema),
   validate(UpsertTaskGradeSchema),
   asyncWrapper(controller.upsertTaskGrade),
+);
+
+const EnsureStudentChatSchema = z.object({
+  student_id: z.coerce.number().int().positive(),
+});
+
+const SendChatMessageSchema = z.object({
+  text: z.string().trim().min(1).max(4000),
+});
+
+router.get('/portal/chats', teacherAuth, asyncWrapper(controller.listChats));
+
+router.post(
+  '/portal/chats',
+  teacherAuth,
+  validate(EnsureStudentChatSchema),
+  asyncWrapper(controller.ensureChatWithStudent),
+);
+
+router.get(
+  '/portal/chats/:id/messages',
+  teacherAuth,
+  validateParams(IdParamSchema),
+  asyncWrapper(controller.getChatMessages),
+);
+
+router.post(
+  '/portal/chats/:id/messages',
+  teacherAuth,
+  validateParams(IdParamSchema),
+  validate(SendChatMessageSchema),
+  asyncWrapper(controller.sendChatMessage),
+);
+
+const StudentIdParamSchema = z.object({
+  studentId: z.coerce.number().int().positive(),
+});
+
+router.get(
+  '/portal/students/:studentId/opinions',
+  teacherAuth,
+  validateParams(StudentIdParamSchema),
+  validateQuery(StudentOpinionsQuerySchema),
+  asyncWrapper(controller.listStudentOpinions),
+);
+
+router.post(
+  '/portal/opinions',
+  teacherAuth,
+  validate(CreateStudentOpinionSchema),
+  asyncWrapper(controller.createStudentOpinion),
+);
+
+router.patch(
+  '/portal/opinions/:id',
+  teacherAuth,
+  validateParams(IdParamSchema),
+  validate(UpdateStudentOpinionSchema),
+  asyncWrapper(controller.updateStudentOpinion),
+);
+
+router.delete(
+  '/portal/opinions/:id',
+  teacherAuth,
+  validateParams(IdParamSchema),
+  asyncWrapper(controller.deleteStudentOpinion),
 );

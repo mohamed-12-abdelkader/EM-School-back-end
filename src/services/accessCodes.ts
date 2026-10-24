@@ -30,19 +30,31 @@ export async function allocateUniqueLoginCode(schoolId: number): Promise<string>
   throw new Error('Failed to allocate a unique login code');
 }
 
-/** Student codes: globally unique so login needs only the student code. */
-export async function allocateUniqueStudentLoginCode(): Promise<string> {
+/** Globally unique among student/parent so either role can login with code only. */
+async function allocateUniquePortalLoginCode(roleLabel: string): Promise<string> {
   for (let i = 0; i < MAX_RETRIES; i++) {
     const code = generateFiveDigitCode();
     const exists = await pool.query(
       `SELECT id FROM users
-       WHERE login_code = $1 AND role = 'student' AND deleted_at IS NULL
+       WHERE login_code = $1
+         AND role IN ('student', 'parent')
+         AND deleted_at IS NULL
        LIMIT 1`,
       [code],
     );
     if (!exists.rowCount) return code;
   }
-  throw new Error('Failed to allocate a unique student login code');
+  throw new Error(`Failed to allocate a unique ${roleLabel} login code`);
+}
+
+/** Student codes: globally unique so login needs only the student code. */
+export async function allocateUniqueStudentLoginCode(): Promise<string> {
+  return allocateUniquePortalLoginCode('student');
+}
+
+/** Parent codes: globally unique so login needs only the guardian code. */
+export async function allocateUniqueParentLoginCode(): Promise<string> {
+  return allocateUniquePortalLoginCode('parent');
 }
 
 export async function allocateUniqueQrToken(): Promise<string> {

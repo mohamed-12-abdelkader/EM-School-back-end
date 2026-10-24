@@ -7,6 +7,7 @@ import { asyncWrapper, HttpError, upload, uploadToCloudinary } from '../utils';
 import pool from '../db/pool';
 import {
   allocateUniqueStudentLoginCode,
+  allocateUniqueParentLoginCode,
   allocateUniqueQrToken,
   buildQrPayload,
 } from '../services/accessCodes';
@@ -140,7 +141,7 @@ async function findOrCreateParent(
     }
   }
 
-  const loginCode = await allocateUniqueStudentLoginCode();
+  const loginCode = await allocateUniqueParentLoginCode();
   const randomPassword = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
 
   const inserted = await client.query(

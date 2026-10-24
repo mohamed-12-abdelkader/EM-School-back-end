@@ -138,7 +138,7 @@ export async function queryDashboard(ctx: StudentCtx, todayDow: number) {
        JOIN subjects s ON s.id = e.subject_id
        JOIN users u ON u.id = e.teacher_id
        LEFT JOIN student_exam_attempts a
-         ON a.exam_id = e.id AND a.student_id = $3
+         ON a.exam_id = e.id AND a.student_id = $3 AND a.submitted_at IS NOT NULL
        WHERE e.classroom_id = $1 AND e.school_id = $2
          AND e.deleted_at IS NULL AND e.status IN ('published', 'closed')
        ORDER BY e.created_at DESC
@@ -185,77 +185,90 @@ export async function queryDashboard(ctx: StudentCtx, todayDow: number) {
 }
 
 export async function listSubjects(ctx: StudentCtx) {
+  // Single-pass aggregates — avoids per-row correlated subqueries that time out on remote DB.
   return pool.query(
-    `SELECT s.id, s.name, s.description,
-       (
-         SELECT u.id FROM timetable_slots ts
+    `WITH subject_ids AS (
+       SELECT DISTINCT subject_id AS id FROM (
+         SELECT ts.subject_id
+         FROM timetable_slots ts
          JOIN timetables t ON t.id = ts.timetable_id
-         JOIN users u ON u.id = ts.teacher_id
          WHERE t.classroom_id = $2 AND t.school_id = $1
            AND t.status = 'published' AND t.deleted_at IS NULL
-           AND ts.subject_id = s.id
-         LIMIT 1
-       ) AS teacher_id,
-       (
-         SELECT u.name FROM timetable_slots ts
-         JOIN timetables t ON t.id = ts.timetable_id
-         JOIN users u ON u.id = ts.teacher_id
-         WHERE t.classroom_id = $2 AND t.school_id = $1
-           AND t.status = 'published' AND t.deleted_at IS NULL
-           AND ts.subject_id = s.id
-         LIMIT 1
-       ) AS teacher_name,
-       (SELECT COUNT(*)::int FROM teacher_lessons l
-         WHERE l.classroom_id = $2 AND l.school_id = $1
-           AND l.subject_id = s.id AND l.deleted_at IS NULL) AS lessons_count,
-       (SELECT COUNT(*)::int FROM teacher_tasks tk
-         WHERE tk.classroom_id = $2 AND tk.school_id = $1
-           AND tk.subject_id = s.id AND tk.deleted_at IS NULL) AS tasks_count,
-       (SELECT COUNT(*)::int FROM teacher_exams e
-         WHERE e.classroom_id = $2 AND e.school_id = $1
-           AND e.subject_id = s.id AND e.deleted_at IS NULL
-           AND e.status IN ('published', 'closed')) AS exams_count,
-       (
-         SELECT a.score FROM student_exam_attempts a
-         JOIN teacher_exams e ON e.id = a.exam_id
-         WHERE a.student_id = $3 AND e.subject_id = s.id
-           AND e.classroom_id = $2 AND e.deleted_at IS NULL
-         ORDER BY a.submitted_at DESC LIMIT 1
-       ) AS last_exam_score,
-       (
-         SELECT a.max_score FROM student_exam_attempts a
-         JOIN teacher_exams e ON e.id = a.exam_id
-         WHERE a.student_id = $3 AND e.subject_id = s.id
-           AND e.classroom_id = $2 AND e.deleted_at IS NULL
-         ORDER BY a.submitted_at DESC LIMIT 1
-       ) AS last_exam_max
+           AND ts.subject_id IS NOT NULL
+         UNION
+         SELECT l.subject_id FROM teacher_lessons l
+         WHERE l.classroom_id = $2 AND l.school_id = $1 AND l.deleted_at IS NULL
+         UNION
+         SELECT e.subject_id FROM teacher_exams e
+         WHERE e.classroom_id = $2 AND e.school_id = $1 AND e.deleted_at IS NULL
+           AND e.status IN ('published', 'closed')
+         UNION
+         SELECT tk.subject_id FROM teacher_tasks tk
+         WHERE tk.classroom_id = $2 AND tk.school_id = $1 AND tk.deleted_at IS NULL
+       ) src
+       WHERE subject_id IS NOT NULL
+     ),
+     teachers AS (
+       SELECT DISTINCT ON (ts.subject_id)
+         ts.subject_id,
+         u.id AS teacher_id,
+         u.name AS teacher_name
+       FROM timetable_slots ts
+       JOIN timetables t ON t.id = ts.timetable_id
+       JOIN users u ON u.id = ts.teacher_id
+       WHERE t.classroom_id = $2 AND t.school_id = $1
+         AND t.status = 'published' AND t.deleted_at IS NULL
+         AND ts.subject_id IS NOT NULL
+       ORDER BY ts.subject_id, ts.id
+     ),
+     lesson_counts AS (
+       SELECT subject_id, COUNT(*)::int AS c
+       FROM teacher_lessons
+       WHERE classroom_id = $2 AND school_id = $1 AND deleted_at IS NULL
+       GROUP BY subject_id
+     ),
+     task_counts AS (
+       SELECT subject_id, COUNT(*)::int AS c
+       FROM teacher_tasks
+       WHERE classroom_id = $2 AND school_id = $1 AND deleted_at IS NULL
+       GROUP BY subject_id
+     ),
+     exam_counts AS (
+       SELECT subject_id, COUNT(*)::int AS c
+       FROM teacher_exams
+       WHERE classroom_id = $2 AND school_id = $1 AND deleted_at IS NULL
+         AND status IN ('published', 'closed')
+       GROUP BY subject_id
+     ),
+     last_attempts AS (
+       SELECT DISTINCT ON (e.subject_id)
+         e.subject_id,
+         a.score AS last_exam_score,
+         a.max_score AS last_exam_max
+       FROM student_exam_attempts a
+       JOIN teacher_exams e ON e.id = a.exam_id
+       WHERE a.student_id = $3
+         AND a.submitted_at IS NOT NULL
+         AND e.classroom_id = $2
+         AND e.deleted_at IS NULL
+       ORDER BY e.subject_id, a.submitted_at DESC
+     )
+     SELECT s.id, s.name, s.description,
+       th.teacher_id,
+       th.teacher_name,
+       COALESCE(lc.c, 0) AS lessons_count,
+       COALESCE(tc.c, 0) AS tasks_count,
+       COALESCE(ec.c, 0) AS exams_count,
+       la.last_exam_score,
+       la.last_exam_max
      FROM subjects s
+     JOIN subject_ids si ON si.id = s.id
+     LEFT JOIN teachers th ON th.subject_id = s.id
+     LEFT JOIN lesson_counts lc ON lc.subject_id = s.id
+     LEFT JOIN task_counts tc ON tc.subject_id = s.id
+     LEFT JOIN exam_counts ec ON ec.subject_id = s.id
+     LEFT JOIN last_attempts la ON la.subject_id = s.id
      WHERE s.school_id = $1 AND s.deleted_at IS NULL
-       AND (
-         EXISTS (
-           SELECT 1 FROM timetable_slots ts
-           JOIN timetables t ON t.id = ts.timetable_id
-           WHERE t.classroom_id = $2 AND t.school_id = $1
-             AND t.status = 'published' AND t.deleted_at IS NULL
-             AND ts.subject_id = s.id
-         )
-         OR EXISTS (
-           SELECT 1 FROM teacher_lessons l
-           WHERE l.classroom_id = $2 AND l.school_id = $1
-             AND l.subject_id = s.id AND l.deleted_at IS NULL
-         )
-         OR EXISTS (
-           SELECT 1 FROM teacher_exams e
-           WHERE e.classroom_id = $2 AND e.school_id = $1
-             AND e.subject_id = s.id AND e.deleted_at IS NULL
-             AND e.status IN ('published', 'closed')
-         )
-         OR EXISTS (
-           SELECT 1 FROM teacher_tasks tk
-           WHERE tk.classroom_id = $2 AND tk.school_id = $1
-             AND tk.subject_id = s.id AND tk.deleted_at IS NULL
-         )
-       )
      ORDER BY s.name`,
     [ctx.schoolId, ctx.classroomId, ctx.studentId],
   );
@@ -271,14 +284,28 @@ export async function findSubject(ctx: StudentCtx, subjectId: number) {
 
 export async function querySubjectDetail(ctx: StudentCtx, subjectId: number) {
   return Promise.all([
+    // Prefer the teacher who actually publishes lessons/tasks for this class,
+    // then fall back to the published timetable slot.
     pool.query(
-      `SELECT u.id, u.name, u.avatar
-       FROM timetable_slots ts
-       JOIN timetables t ON t.id = ts.timetable_id
-       JOIN users u ON u.id = ts.teacher_id
-       WHERE t.classroom_id = $1 AND t.school_id = $2
-         AND t.status = 'published' AND t.deleted_at IS NULL
-         AND ts.subject_id = $3
+      `SELECT u.id, u.name, u.avatar FROM (
+         SELECT teacher_id, created_at FROM teacher_lessons
+         WHERE classroom_id = $1 AND school_id = $2 AND subject_id = $3 AND deleted_at IS NULL
+         UNION ALL
+         SELECT teacher_id, created_at FROM teacher_tasks
+         WHERE classroom_id = $1 AND school_id = $2 AND subject_id = $3 AND deleted_at IS NULL
+         UNION ALL
+         SELECT teacher_id, created_at FROM teacher_exams
+         WHERE classroom_id = $1 AND school_id = $2 AND subject_id = $3 AND deleted_at IS NULL
+         UNION ALL
+         SELECT ts.teacher_id, t.updated_at AS created_at
+         FROM timetable_slots ts
+         JOIN timetables t ON t.id = ts.timetable_id
+         WHERE t.classroom_id = $1 AND t.school_id = $2
+           AND t.status = 'published' AND t.deleted_at IS NULL
+           AND ts.subject_id = $3 AND ts.teacher_id IS NOT NULL
+       ) src
+       JOIN users u ON u.id = src.teacher_id
+       ORDER BY src.created_at DESC NULLS LAST
        LIMIT 1`,
       [ctx.classroomId, ctx.schoolId, subjectId],
     ),
@@ -309,7 +336,7 @@ export async function querySubjectDetail(ctx: StudentCtx, subjectId: number) {
          a.id AS attempt_id, a.score, a.max_score AS attempt_max, a.submitted_at AS attempt_at
        FROM teacher_exams e
        LEFT JOIN student_exam_attempts a
-         ON a.exam_id = e.id AND a.student_id = $4
+         ON a.exam_id = e.id AND a.student_id = $4 AND a.submitted_at IS NOT NULL
        WHERE e.classroom_id = $1 AND e.school_id = $2
          AND e.subject_id = $3 AND e.deleted_at IS NULL
          AND e.status IN ('published', 'closed')
@@ -515,7 +542,7 @@ export async function listExams(ctx: StudentCtx, subjectId: number | null) {
      JOIN subjects s ON s.id = e.subject_id
      JOIN users u ON u.id = e.teacher_id
      LEFT JOIN student_exam_attempts a
-       ON a.exam_id = e.id AND a.student_id = $3
+       ON a.exam_id = e.id AND a.student_id = $3 AND a.submitted_at IS NOT NULL
      WHERE e.classroom_id = $1 AND e.school_id = $2
        AND e.deleted_at IS NULL AND e.status IN ('published', 'closed')${filter}
      ORDER BY e.created_at DESC`,
@@ -536,10 +563,13 @@ export async function queryExamDetail(examId: number, studentId: number) {
        ORDER BY c.position, c.id`,
       [examId],
     ),
-    pool.query(`SELECT * FROM student_exam_attempts WHERE exam_id = $1 AND student_id = $2`, [
-      examId,
-      studentId,
-    ]),
+    pool.query(
+      `SELECT *,
+         GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (ends_at - NOW()))))::int AS remaining_seconds
+       FROM student_exam_attempts
+       WHERE exam_id = $1 AND student_id = $2`,
+      [examId, studentId],
+    ),
   ]);
 }
 
@@ -548,10 +578,29 @@ export async function listExamAnswers(attemptId: number) {
 }
 
 export async function findExamAttempt(examId: number, studentId: number) {
-  return pool.query(`SELECT id FROM student_exam_attempts WHERE exam_id = $1 AND student_id = $2`, [
-    examId,
-    studentId,
-  ]);
+  return pool.query(
+    `SELECT *,
+       GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (ends_at - NOW()))))::int AS remaining_seconds
+     FROM student_exam_attempts
+     WHERE exam_id = $1 AND student_id = $2`,
+    [examId, studentId],
+  );
+}
+
+export async function startExamAttempt(input: {
+  examId: number;
+  studentId: number;
+  durationMin: number;
+}) {
+  const duration = Math.max(1, Number(input.durationMin) || 30);
+  return pool.query(
+    `INSERT INTO student_exam_attempts
+       (exam_id, student_id, score, max_score, started_at, ends_at, submitted_at)
+     VALUES ($1, $2, 0, 0, NOW(), NOW() + make_interval(mins => $3::int), NULL)
+     RETURNING *,
+       GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (ends_at - NOW()))))::int AS remaining_seconds`,
+    [input.examId, input.studentId, duration],
+  );
 }
 
 export async function listExamQuestions(examId: number) {
@@ -573,6 +622,8 @@ export async function listExamChoices(examId: number) {
 export async function saveExamSubmission(input: {
   examId: number;
   studentId: number;
+  attemptId?: number | null;
+  timedOut?: boolean;
   answers: Array<{
     questionId: number;
     type: string;
@@ -585,12 +636,31 @@ export async function saveExamSubmission(input: {
   maxScore: number;
 }) {
   return withTransaction(async (client) => {
-    const attemptRes = await client.query(
-      `INSERT INTO student_exam_attempts (exam_id, student_id, score, max_score)
-       VALUES ($1, $2, 0, 0) RETURNING *`,
-      [input.examId, input.studentId],
-    );
-    const attemptId = attemptRes.rows[0].id;
+    let attemptId = input.attemptId ?? null;
+
+    if (attemptId) {
+      const owned = await client.query(
+        `SELECT id FROM student_exam_attempts
+         WHERE id = $1 AND exam_id = $2 AND student_id = $3 AND submitted_at IS NULL`,
+        [attemptId, input.examId, input.studentId],
+      );
+      if (!owned.rowCount) {
+        throw Object.assign(new Error('Attempt not open'), { status: 400 });
+      }
+    } else {
+      const created = await client.query(
+        `INSERT INTO student_exam_attempts
+           (exam_id, student_id, score, max_score, started_at, ends_at, submitted_at)
+         VALUES ($1, $2, 0, 0, NOW(), NOW(), NULL)
+         RETURNING id`,
+        [input.examId, input.studentId],
+      );
+      attemptId = created.rows[0].id;
+    }
+
+    await client.query(`DELETE FROM student_exam_answers WHERE attempt_id = $1`, [
+      attemptId,
+    ]);
 
     for (const ans of input.answers) {
       if (ans.type === 'mcq') {
@@ -612,9 +682,12 @@ export async function saveExamSubmission(input: {
 
     await client.query(
       `UPDATE student_exam_attempts
-       SET score = $1, max_score = $2, submitted_at = NOW()
+       SET score = $1,
+           max_score = $2,
+           submitted_at = NOW(),
+           timed_out = $4
        WHERE id = $3`,
-      [input.score, input.maxScore, attemptId],
+      [input.score, input.maxScore, attemptId, !!input.timedOut],
     );
 
     return attemptId as number;
@@ -652,7 +725,8 @@ export async function queryResults(ctx: StudentCtx) {
        FROM student_exam_attempts a
        JOIN teacher_exams e ON e.id = a.exam_id
        JOIN subjects s ON s.id = e.subject_id
-       WHERE a.student_id = $1 AND e.classroom_id = $2 AND e.deleted_at IS NULL
+       WHERE a.student_id = $1 AND a.submitted_at IS NOT NULL
+         AND e.classroom_id = $2 AND e.deleted_at IS NULL
        ORDER BY a.submitted_at DESC`,
       [ctx.studentId, ctx.classroomId],
     ),
@@ -669,13 +743,13 @@ export async function queryResults(ctx: StudentCtx) {
   ]);
 }
 
-export async function listNotifications(studentId: number) {
+export async function listNotifications(studentId: number, limit = 100) {
   return pool.query(
     `SELECT * FROM student_notifications
      WHERE student_id = $1
      ORDER BY created_at DESC
-     LIMIT 100`,
-    [studentId],
+     LIMIT $2`,
+    [studentId, Math.min(Math.max(limit, 1), 100)],
   );
 }
 

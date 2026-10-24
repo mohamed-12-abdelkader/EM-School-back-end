@@ -17,6 +17,7 @@ import { router as schoolAttendanceRouter } from './controllers/schoolAttendance
 import { router as schoolFeesRouter } from './controllers/schoolFees';
 import { router as teacherTimetableRouter } from './controllers/teacherTimetable';
 import { router as teacherPortalRouter } from './teacherPortal';
+import { router as parentPortalRouter } from './parentPortal';
 import { router as utilsRouter } from './controllers/utils';
 import { v1Router } from './routes/v1';
 
@@ -33,6 +34,7 @@ router.use('/teacher', teacherPortalRouter);
 router.use('/teacher', teacherRouter);
 router.use('/student', studentPortalRouter);
 router.use('/student', studentRouter);
+router.use('/parent', parentPortalRouter);
 router.use('/schools', schoolsRouter);
 router.use('/school/grades', schoolGradesRouter);
 router.use('/school/classrooms', schoolClassroomsRouter);

@@ -8,6 +8,7 @@ import {
   ForgotPassword,
   Login,
   LoginByCode,
+  LoginParentByCode,
   LoginStudentByCode,
   ResetPassword,
 } from './auth.modules';
@@ -245,6 +246,90 @@ router.post(
         classroom_id: studentProfile.classroom_id,
         classroom_name: studentProfile.classroom_name,
         seat_number: studentProfile.seat_number,
+      },
+      token,
+    });
+  }),
+);
+
+/** Parent login with guardian code only (globally unique). */
+router.post(
+  '/login/parent',
+  validate(LoginParentByCode),
+  asyncWrapper(async (req, res) => {
+    const { login_code } = req.body;
+    const ip = req.ip || req.socket.remoteAddress || null;
+
+    const attempts = await pool.query(
+      `SELECT COUNT(*)::int AS failed
+       FROM login_code_attempts
+       WHERE ip_address = $1
+         AND success = FALSE
+         AND created_at > NOW() - INTERVAL '15 minutes'`,
+      [ip],
+    );
+    if (attempts.rows[0].failed >= 20) {
+      return res.status(429).json({
+        message: 'Too many failed login attempts. Please try again later.',
+      });
+    }
+
+    const userQuery = await pool.query(
+      `SELECT u.*
+       FROM users u
+       WHERE u.login_code = $1
+         AND u.role = 'parent'
+         AND u.deleted_at IS NULL`,
+      [login_code],
+    );
+
+    if (!userQuery.rowCount || userQuery.rows[0].is_active === false) {
+      await pool.query(
+        `INSERT INTO login_code_attempts (school_id, login_code, ip_address, success)
+         VALUES (NULL, $1, $2, FALSE)`,
+        [login_code, ip],
+      );
+      return res.status(400).json({ message: 'Invalid credentials' });
+    }
+
+    const user = userQuery.rows[0];
+
+    const schoolResult = await pool.query(
+      `SELECT id, name, login_code, is_active, deleted_at
+       FROM schools WHERE id = $1`,
+      [user.school_id],
+    );
+    if (
+      !schoolResult.rowCount ||
+      schoolResult.rows[0].deleted_at ||
+      !schoolResult.rows[0].is_active
+    ) {
+      return res.status(403).json({ message: 'School account is inactive' });
+    }
+    const school = schoolResult.rows[0];
+
+    await pool.query(
+      `INSERT INTO login_code_attempts (school_id, login_code, ip_address, success)
+       VALUES ($1, $2, $3, TRUE)`,
+      [school.id, login_code, ip],
+    );
+
+    const token = await generateToken(user, pool);
+    res.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        school_id: user.school_id,
+        login_code: user.login_code,
+        avatar: user.avatar,
+      },
+      school: {
+        id: school.id,
+        name: school.name,
+        login_code: school.login_code,
       },
       token,
     });

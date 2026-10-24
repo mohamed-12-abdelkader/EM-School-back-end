@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import * as portalChat from '../portalChat/service';
 import * as teacherPortalService from './service';
 
 /** Controllers: read request → call service → send response. */
@@ -135,4 +136,59 @@ export async function deleteTask(req: Request, res: Response) {
 
 export async function upsertTaskGrade(req: Request, res: Response) {
   res.json(await teacherPortalService.upsertTaskGrade(req.user, req.params.id, req.body));
+}
+
+export async function listChats(req: Request, res: Response) {
+  res.json(await portalChat.listTeacherChats(req.user));
+}
+
+export async function ensureChatWithStudent(req: Request, res: Response) {
+  res.status(201).json(
+    await portalChat.ensureTeacherChatWithStudent(
+      req.user,
+      Number(req.body.student_id),
+    ),
+  );
+}
+
+export async function getChatMessages(req: Request, res: Response) {
+  res.json(await portalChat.getTeacherMessages(req.user, Number(req.params.id)));
+}
+
+export async function sendChatMessage(req: Request, res: Response) {
+  res.status(201).json(
+    await portalChat.sendTeacherMessage(
+      req.user,
+      Number(req.params.id),
+      String(req.body.text || ''),
+    ),
+  );
+}
+
+export async function listStudentOpinions(req: Request, res: Response) {
+  res.json(
+    await teacherPortalService.listStudentOpinions(
+      req.user,
+      Number(req.params.studentId),
+      Number(req.query.classroom_id),
+    ),
+  );
+}
+
+export async function createStudentOpinion(req: Request, res: Response) {
+  res.status(201).json(await teacherPortalService.createStudentOpinion(req.user, req.body));
+}
+
+export async function updateStudentOpinion(req: Request, res: Response) {
+  res.json(
+    await teacherPortalService.updateStudentOpinion(
+      req.user,
+      Number(req.params.id),
+      req.body,
+    ),
+  );
+}
+
+export async function deleteStudentOpinion(req: Request, res: Response) {
+  res.json(await teacherPortalService.deleteStudentOpinion(req.user, Number(req.params.id)));
 }

@@ -946,6 +946,22 @@ router.post(
       [req.user!.id, timetable.id, schoolId],
     );
 
+    try {
+      const { notifyClassroomStudents } = await import('../services/studentNotifications');
+      await notifyClassroomStudents({
+        schoolId,
+        classroomId: timetable.classroom_id,
+        kind: 'timetable',
+        title: 'تم نشر الجدول الدراسي',
+        body: 'راجع حصصك الجديدة في الجدول',
+        href: '/timetable',
+        refType: 'timetable',
+        refId: timetable.id,
+      });
+    } catch {
+      // Non-blocking: publish still succeeds if notifications fail.
+    }
+
     res.json({ message: 'Timetable published', timetable: result.rows[0] });
   }),
 );

@@ -575,3 +575,130 @@ export async function upsertTaskGrade(
   }
   return { grade: result.rows[0] };
 }
+
+function mapOpinionRow(row: Record<string, unknown>) {
+  return {
+    id: Number(row.id),
+    title: (row.title as string) || null,
+    body: row.body as string,
+    subject_id: row.subject_id != null ? Number(row.subject_id) : null,
+    subject_name: (row.subject_name as string) || null,
+    classroom_id: row.classroom_id != null ? Number(row.classroom_id) : null,
+    student_id: row.student_id != null ? Number(row.student_id) : undefined,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+export async function listStudentOpinions(
+  user: User | undefined,
+  studentId: number,
+  classroomId: number,
+) {
+  const ctx = requireTeacherSchool(user);
+  const assigned = await repo.findAssignedClassroom(ctx.teacherId, ctx.schoolId, classroomId);
+  if (!assigned.rowCount) throw new HttpError(403, 'This class is not assigned to you');
+
+  const student = await repo.findStudentInSchoolClassroom(
+    studentId,
+    ctx.schoolId,
+    classroomId,
+  );
+  if (!student.rowCount) throw new HttpError(404, 'Student not found in this class');
+
+  const result = await repo.listStudentOpinions({
+    teacherId: ctx.teacherId,
+    schoolId: ctx.schoolId,
+    studentId,
+  });
+
+  return {
+    student: {
+      id: student.rows[0].id,
+      name: student.rows[0].name,
+      classroom_id: student.rows[0].classroom_id,
+    },
+    opinions: result.rows.map(mapOpinionRow),
+  };
+}
+
+export async function createStudentOpinion(
+  user: User | undefined,
+  body: {
+    student_id: number;
+    classroom_id: number;
+    subject_id?: number | null;
+    title?: string | null;
+    body: string;
+  },
+) {
+  const ctx = requireTeacherSchool(user);
+  const assigned = await repo.findAssignedClassroom(
+    ctx.teacherId,
+    ctx.schoolId,
+    body.classroom_id,
+  );
+  if (!assigned.rowCount) throw new HttpError(403, 'This class is not assigned to you');
+
+  if (body.subject_id) {
+    await assertTeacherOwnsClassroomSubject(
+      ctx.teacherId,
+      ctx.schoolId,
+      body.classroom_id,
+      body.subject_id,
+    );
+  }
+
+  const student = await repo.findStudentInSchoolClassroom(
+    body.student_id,
+    ctx.schoolId,
+    body.classroom_id,
+  );
+  if (!student.rowCount) throw new HttpError(400, 'Student not in this class');
+
+  const text = String(body.body || '').trim();
+  if (!text) throw new HttpError(400, 'Opinion body is required');
+
+  const result = await repo.insertStudentOpinion({
+    schoolId: ctx.schoolId,
+    teacherId: ctx.teacherId,
+    studentId: body.student_id,
+    classroomId: body.classroom_id,
+    subjectId: body.subject_id ?? null,
+    title: body.title?.trim() || null,
+    body: text,
+  });
+
+  return { opinion: mapOpinionRow(result.rows[0]) };
+}
+
+export async function updateStudentOpinion(
+  user: User | undefined,
+  opinionId: number,
+  body: { title?: string | null; body?: string },
+) {
+  const ctx = requireTeacherSchool(user);
+  if (body.body !== undefined && !String(body.body).trim()) {
+    throw new HttpError(400, 'Opinion body cannot be empty');
+  }
+  const result = await repo.updateStudentOpinion({
+    id: opinionId,
+    teacherId: ctx.teacherId,
+    schoolId: ctx.schoolId,
+    title: body.title,
+    body: body.body !== undefined ? String(body.body).trim() : undefined,
+  });
+  if (!result.rowCount) throw new HttpError(404, 'Opinion not found');
+  return { opinion: mapOpinionRow(result.rows[0]) };
+}
+
+export async function deleteStudentOpinion(user: User | undefined, opinionId: number) {
+  const ctx = requireTeacherSchool(user);
+  const result = await repo.softDeleteStudentOpinion(
+    opinionId,
+    ctx.teacherId,
+    ctx.schoolId,
+  );
+  if (!result.rowCount) throw new HttpError(404, 'Opinion not found');
+  return { message: 'Opinion deleted' };
+}

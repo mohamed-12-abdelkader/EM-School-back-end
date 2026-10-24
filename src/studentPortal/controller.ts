@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import * as portalChat from '../portalChat/service';
 import * as studentPortalService from './service';
 
 /** Controllers: read request → call service → send response. */
@@ -61,6 +62,11 @@ export async function getExamDetail(req: Request, res: Response) {
   res.json(await studentPortalService.getExamDetail(req.user, Number(req.params.id)));
 }
 
+export async function startExam(req: Request, res: Response) {
+  const result = await studentPortalService.startExam(req.user, Number(req.params.id));
+  res.status(201).json(result);
+}
+
 export async function submitExam(req: Request, res: Response) {
   const result = await studentPortalService.submitExam(
     req.user,
@@ -93,4 +99,31 @@ export async function markNotificationRead(req: Request, res: Response) {
 
 export async function markAllNotificationsRead(req: Request, res: Response) {
   res.json(await studentPortalService.markAllNotificationsRead(req.user));
+}
+
+export async function listChats(req: Request, res: Response) {
+  res.json(await portalChat.listStudentChats(req.user));
+}
+
+export async function ensureChatWithTeacher(req: Request, res: Response) {
+  res.status(201).json(
+    await portalChat.ensureStudentChatWithTeacher(
+      req.user,
+      Number(req.body.teacher_id),
+    ),
+  );
+}
+
+export async function getChatMessages(req: Request, res: Response) {
+  res.json(await portalChat.getStudentMessages(req.user, Number(req.params.id)));
+}
+
+export async function sendChatMessage(req: Request, res: Response) {
+  res.status(201).json(
+    await portalChat.sendStudentMessage(
+      req.user,
+      Number(req.params.id),
+      String(req.body.text || ''),
+    ),
+  );
 }

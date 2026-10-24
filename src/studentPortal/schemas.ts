@@ -10,6 +10,7 @@ export const SubmitExamSchema = z.object({
       }),
     )
     .default([]),
+  timed_out: z.boolean().optional(),
 });
 
 export const SubmitTaskSchema = z.object({
@@ -35,6 +36,14 @@ export const IdParamSchema = z.object({
 
 export const SubjectIdQuerySchema = z.object({
   subject_id: z.coerce.number().int().positive().optional(),
+});
+
+export const EnsureChatSchema = z.object({
+  teacher_id: z.coerce.number().int().positive(),
+});
+
+export const SendChatMessageSchema = z.object({
+  text: z.string().trim().min(1).max(4000),
 });
 
 export const TimetableQuerySchema = z.object({

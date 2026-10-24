@@ -154,3 +154,24 @@ export const UpsertTaskGradeSchema = z.object({
   grade: z.coerce.number().min(0).nullable().optional(),
   review: z.string().max(5000).optional().nullable(),
 });
+
+export const CreateStudentOpinionSchema = z.object({
+  student_id: z.coerce.number().int().positive(),
+  classroom_id: z.coerce.number().int().positive(),
+  subject_id: z.coerce.number().int().positive().optional().nullable(),
+  title: z.string().trim().max(200).optional().nullable(),
+  body: z.string().trim().min(1).max(5000),
+});
+
+export const UpdateStudentOpinionSchema = z
+  .object({
+    title: z.string().trim().max(200).optional().nullable(),
+    body: z.string().trim().min(1).max(5000).optional(),
+  })
+  .refine((v) => v.title !== undefined || v.body !== undefined, {
+    message: 'At least one field is required',
+  });
+
+export const StudentOpinionsQuerySchema = z.object({
+  classroom_id: z.coerce.number().int().positive(),
+});

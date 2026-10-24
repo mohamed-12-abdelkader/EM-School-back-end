@@ -5,7 +5,9 @@ export type StudentNotificationKind =
   | 'exam'
   | 'task'
   | 'grade'
-  | 'announcement';
+  | 'announcement'
+  | 'message'
+  | 'timetable';
 
 /** Notify every active student in a classroom. */
 export async function notifyClassroomStudents(opts: {

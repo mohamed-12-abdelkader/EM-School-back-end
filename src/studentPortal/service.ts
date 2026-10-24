@@ -59,6 +59,7 @@ export async function getDashboard(user: User | undefined) {
 
   const pendingTasks = tasks.rows.filter((t) => !t.submitted_at && t.grade == null).length;
   const pendingExams = exams.rows.filter((e) => !e.attempt_id).length;
+  const recentNotifications = await repo.listNotifications(ctx.studentId, 8);
 
   return {
     profile: {
@@ -130,6 +131,15 @@ export async function getDashboard(user: User | undefined) {
       maxScore: e.attempt_max != null ? Number(e.attempt_max) : Number(e.total_points),
       date: e.created_at,
     })),
+    recent_notifications: recentNotifications.rows.map((n) => ({
+      id: String(n.id),
+      kind: n.kind,
+      title: n.title,
+      body: n.body,
+      at: n.created_at,
+      read: !!n.read_at,
+      href: n.href || null,
+    })),
   };
 }
 
@@ -173,6 +183,13 @@ export async function getSubjectDetail(user: User | undefined, subjectId: number
   const style = subjectStyle(subjectId);
   const teacherRow = teacher.rows[0];
 
+  const doneTasks = tasks.rows.filter((t) => t.submitted_at || t.grade != null).length;
+  const doneExams = exams.rows.filter((e) => e.attempt_id).length;
+  const totalTrackable = lessons.rows.length + tasks.rows.length + exams.rows.length;
+  const doneTrackable = lessons.rows.length + doneTasks + doneExams;
+  const progress =
+    totalTrackable > 0 ? Math.round((doneTrackable / totalTrackable) * 100) : 0;
+
   return {
     subject: {
       id: String(subject.rows[0].id),
@@ -181,9 +198,11 @@ export async function getSubjectDetail(user: User | undefined, subjectId: number
       icon: style.icon,
       color: style.color,
       teacherId: teacherRow ? String(teacherRow.id) : '',
-      progress: 0,
+      teacherName: teacherRow?.name || '',
+      progress,
       lecturesCount: lessons.rows.length,
       assignmentsCount: tasks.rows.length,
+      examsCount: exams.rows.length,
     },
     teacher: teacherRow
       ? {
@@ -196,7 +215,7 @@ export async function getSubjectDetail(user: User | undefined, subjectId: number
     lectures: lessons.rows.map((l) => ({
       id: String(l.id),
       subjectId: String(subjectId),
-      teacherId: teacherRow ? String(teacherRow.id) : String(l.teacher_id),
+      teacherId: String(l.teacher_id || teacherRow?.id || ''),
       title: l.title,
       durationMin: 0,
       date: l.created_at,
@@ -211,6 +230,7 @@ export async function getSubjectDetail(user: User | undefined, subjectId: number
       id: String(t.id),
       subjectId: String(subjectId),
       teacherId: String(t.teacher_id),
+      teacherName: teacherRow?.name || '',
       title: t.title,
       dueAt: t.due_at,
       status: mapTaskStatus(t),
@@ -223,6 +243,8 @@ export async function getSubjectDetail(user: User | undefined, subjectId: number
     exams: exams.rows.map((e) => ({
       id: String(e.id),
       subjectId: String(subjectId),
+      subjectName: subject.rows[0].name,
+      teacherName: teacherRow?.name || '',
       title: e.title,
       durationMin: e.duration_minutes || 0,
       questionIds: Array.from({ length: Number(e.questions_count) }, (_, i) => String(i)),
@@ -533,12 +555,46 @@ export async function getExams(user: User | undefined, subjectId?: number) {
   };
 }
 
+/** Prefer SQL-computed remaining (avoids TZ skew on timestamp-without-time-zone). */
+function remainingFromRow(row: {
+  ends_at?: unknown;
+  remaining_seconds?: unknown;
+}): number {
+  if (row.remaining_seconds != null && Number.isFinite(Number(row.remaining_seconds))) {
+    return Math.max(0, Math.floor(Number(row.remaining_seconds)));
+  }
+  if (!row.ends_at) return 0;
+  const end = new Date(String(row.ends_at)).getTime();
+  if (!Number.isFinite(end)) return 0;
+  return Math.max(0, Math.floor((end - Date.now()) / 1000));
+}
+
+function mapAttemptPayload(row: {
+  id: number;
+  started_at: Date | string;
+  ends_at: Date | string | null;
+  remaining_seconds?: number | string | null;
+  submitted_at?: Date | string | null;
+  timed_out?: boolean;
+}) {
+  return {
+    id: String(row.id),
+    startedAt: row.started_at,
+    endsAt: row.ends_at,
+    remainingSeconds: remainingFromRow(row),
+    serverNow: new Date().toISOString(),
+    timedOut: !!row.timed_out,
+  };
+}
+
 export async function getExamDetail(user: User | undefined, examId: number) {
   const ctx = await requireStudentCtx(user);
   const exam = await assertStudentOwnsExam(ctx, examId);
   const [questions, choices, attempt] = await repo.queryExamDetail(exam.id, ctx.studentId);
 
-  const submitted = !!attempt.rowCount;
+  const row = attempt.rowCount ? attempt.rows[0] : null;
+  const submitted = !!(row && row.submitted_at);
+  const inProgress = !!(row && !row.submitted_at);
   const byQ = new Map<number, typeof choices.rows>();
   for (const ch of choices.rows) {
     const list = byQ.get(ch.question_id) || [];
@@ -553,8 +609,8 @@ export async function getExamDetail(user: User | undefined, examId: number) {
     is_correct: boolean | null;
     points_awarded: number;
   }[] = [];
-  if (submitted) {
-    const ans = await repo.listExamAnswers(attempt.rows[0].id);
+  if (submitted && row) {
+    const ans = await repo.listExamAnswers(row.id);
     answerRows = ans.rows;
   }
   const ansByQ = new Map(answerRows.map((a) => [a.question_id, a]));
@@ -572,9 +628,14 @@ export async function getExamDetail(user: User | undefined, examId: number) {
       status: exam.status,
       date: exam.created_at,
       attempted: submitted,
-      attemptId: submitted ? String(attempt.rows[0].id) : null,
-      score: submitted ? Number(attempt.rows[0].score) : null,
-      maxScore: submitted ? Number(attempt.rows[0].max_score) : Number(exam.total_points),
+      inProgress,
+      attemptId: row ? String(row.id) : null,
+      startedAt: inProgress || submitted ? row?.started_at ?? null : null,
+      endsAt: inProgress || submitted ? row?.ends_at ?? null : null,
+      remainingSeconds: inProgress ? remainingFromRow(row!) : null,
+      serverNow: new Date().toISOString(),
+      score: submitted ? Number(row!.score) : null,
+      maxScore: submitted ? Number(row!.max_score) : Number(exam.total_points),
       questionIds: questions.rows.map((q) => String(q.id)),
       difficulty: 'medium' as const,
       isOfficial: true,
@@ -607,10 +668,39 @@ export async function getExamDetail(user: User | undefined, examId: number) {
   };
 }
 
+export async function startExam(user: User | undefined, examId: number) {
+  const ctx = await requireStudentCtx(user);
+  const exam = await assertStudentOwnsExam(ctx, examId);
+  if (exam.status !== 'published') {
+    throw new HttpError(
+      400,
+      exam.status === 'closed' ? 'Exam is closed' : 'Exam is not open',
+    );
+  }
+
+  const existing = await repo.findExamAttempt(exam.id, ctx.studentId);
+  if (existing.rowCount) {
+    const row = existing.rows[0];
+    if (row.submitted_at) throw new HttpError(400, 'Exam already submitted');
+    return { attempt: mapAttemptPayload(row) };
+  }
+
+  try {
+    const created = await repo.startExamAttempt({
+      examId: exam.id,
+      studentId: ctx.studentId,
+      durationMin: exam.duration_minutes || 30,
+    });
+    return { attempt: mapAttemptPayload(created.rows[0]) };
+  } catch (err) {
+    mapDuplicateSubmitError(err);
+  }
+}
+
 export async function submitExam(
   user: User | undefined,
   examId: number,
-  body: { answers: SubmitAnswer[] },
+  body: { answers: SubmitAnswer[]; timed_out?: boolean },
 ) {
   const ctx = await requireStudentCtx(user);
   const exam = await assertStudentOwnsExam(ctx, examId);
@@ -622,7 +712,12 @@ export async function submitExam(
   }
 
   const existing = await repo.findExamAttempt(exam.id, ctx.studentId);
-  if (existing.rowCount) throw new HttpError(400, 'Exam already submitted');
+  if (!existing.rowCount) throw new HttpError(400, 'Exam not started');
+  const open = existing.rows[0];
+  if (open.submitted_at) throw new HttpError(400, 'Exam already submitted');
+
+  const remaining = remainingFromRow(open);
+  const timedOut = remaining <= 0 || !!body.timed_out;
 
   const questions = await repo.listExamQuestions(exam.id);
   const choices = await repo.listExamChoices(exam.id);
@@ -645,11 +740,21 @@ export async function submitExam(
     attemptId = await repo.saveExamSubmission({
       examId: exam.id,
       studentId: ctx.studentId,
+      attemptId: open.id,
+      timedOut,
       answers: graded,
       score,
       maxScore,
     });
   } catch (err) {
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      'status' in err &&
+      Number((err as { status: number }).status) === 400
+    ) {
+      throw new HttpError(400, (err as Error).message || 'Attempt not open');
+    }
     mapDuplicateSubmitError(err);
   }
 
@@ -662,6 +767,7 @@ export async function submitExam(
       maxScore,
       percent,
       pendingWrittenPoints,
+      timedOut,
       finishedAt: new Date().toISOString(),
     },
   };
@@ -672,6 +778,7 @@ export async function getExamResult(user: User | undefined, examId: number) {
   const exam = await assertStudentOwnsExam(ctx, examId);
   const attempt = await repo.findFullExamAttempt(exam.id, ctx.studentId);
   if (!attempt.rowCount) throw new HttpError(404, 'No attempt found');
+  if (!attempt.rows[0].submitted_at) throw new HttpError(404, 'No attempt found');
 
   const [questions, choices, answers] = await repo.queryExamResultParts(
     exam.id,

@@ -760,3 +760,114 @@ export async function upsertTaskGrade(input: {
     [input.taskId, input.studentId, input.grade, input.review],
   );
 }
+
+export async function findStudentInSchoolClassroom(
+  studentId: number,
+  schoolId: number,
+  classroomId: number,
+) {
+  return pool.query(
+    `SELECT u.id, u.name, sp.classroom_id
+     FROM users u
+     JOIN student_profiles sp ON sp.user_id = u.id
+     WHERE u.id = $1
+       AND u.school_id = $2
+       AND sp.classroom_id = $3
+       AND u.role = 'student'
+       AND u.deleted_at IS NULL
+     LIMIT 1`,
+    [studentId, schoolId, classroomId],
+  );
+}
+
+export async function listStudentOpinions(params: {
+  teacherId: number;
+  schoolId: number;
+  studentId: number;
+}) {
+  return pool.query(
+    `SELECT
+       o.id, o.title, o.body, o.subject_id, o.classroom_id,
+       o.created_at, o.updated_at,
+       s.name AS subject_name
+     FROM teacher_student_opinions o
+     LEFT JOIN subjects s ON s.id = o.subject_id
+     WHERE o.teacher_id = $1
+       AND o.school_id = $2
+       AND o.student_id = $3
+       AND o.deleted_at IS NULL
+     ORDER BY o.created_at DESC`,
+    [params.teacherId, params.schoolId, params.studentId],
+  );
+}
+
+export async function insertStudentOpinion(input: {
+  schoolId: number;
+  teacherId: number;
+  studentId: number;
+  classroomId: number | null;
+  subjectId: number | null;
+  title: string | null;
+  body: string;
+}) {
+  return pool.query(
+    `INSERT INTO teacher_student_opinions
+       (school_id, teacher_id, student_id, classroom_id, subject_id, title, body)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [
+      input.schoolId,
+      input.teacherId,
+      input.studentId,
+      input.classroomId,
+      input.subjectId,
+      input.title,
+      input.body,
+    ],
+  );
+}
+
+export async function updateStudentOpinion(input: {
+  id: number;
+  teacherId: number;
+  schoolId: number;
+  title?: string | null;
+  body?: string;
+}) {
+  const sets: string[] = ['updated_at = NOW()'];
+  const values: unknown[] = [];
+  let i = 1;
+  if (input.title !== undefined) {
+    sets.push(`title = $${i++}`);
+    values.push(input.title);
+  }
+  if (input.body !== undefined) {
+    sets.push(`body = $${i++}`);
+    values.push(input.body);
+  }
+  values.push(input.id, input.teacherId, input.schoolId);
+  return pool.query(
+    `UPDATE teacher_student_opinions
+     SET ${sets.join(', ')}
+     WHERE id = $${i++}
+       AND teacher_id = $${i++}
+       AND school_id = $${i}
+       AND deleted_at IS NULL
+     RETURNING *`,
+    values,
+  );
+}
+
+export async function softDeleteStudentOpinion(
+  id: number,
+  teacherId: number,
+  schoolId: number,
+) {
+  return pool.query(
+    `UPDATE teacher_student_opinions
+     SET deleted_at = NOW(), updated_at = NOW()
+     WHERE id = $1 AND teacher_id = $2 AND school_id = $3 AND deleted_at IS NULL
+     RETURNING id`,
+    [id, teacherId, schoolId],
+  );
+}

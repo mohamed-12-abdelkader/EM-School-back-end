@@ -47,6 +47,11 @@ export const LoginStudentByCode = z.object({
   login_code: z.string().regex(/^\d{5}$/, 'Login code must be exactly 5 digits'),
 });
 
+/** Parent-only login: 5-digit guardian code (globally unique) */
+export const LoginParentByCode = z.object({
+  login_code: z.string().regex(/^\d{5}$/, 'Login code must be exactly 5 digits'),
+});
+
 export const ForgotPassword = z.object({
   email: z.string().email(),
 });
